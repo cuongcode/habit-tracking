@@ -1,33 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Monochromatic Palette */
+  --color-black: #000000;
+  --color-gray-900: #1a1a1a;
+  --color-gray-800: #333333;
+  --color-gray-700: #4d4d4d;
+  --color-gray-600: #666666;
+  --color-gray-500: #808080;
+  --color-gray-400: #999999;
+  --color-gray-300: #b3b3b3;
+  --color-gray-200: #cccccc;
+  --color-gray-100: #e6e6e6;
+  --color-gray-50: #f2f2f2;
+  --color-white: #ffffff;
+
+  /* Theme Defaults (Light Mode) */
+  --background: var(--color-white);
+  --foreground: var(--color-black);
+
+  --card-bg: var(--color-gray-50);
+  --card-foreground: var(--color-black);
+  --card-border: var(--color-gray-200);
+
+  --primary: var(--color-black);
+  --primary-foreground: var(--color-white);
+
+  --secondary: var(--color-gray-100);
+  --secondary-foreground: var(--color-gray-900);
+
+  --muted: var(--color-gray-100);
+  --muted-foreground: var(--color-gray-500);
+
+  --accent: var(--color-gray-100);
+  --accent-foreground: var(--color-gray-900);
+
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: var(--color-gray-200);
+  --input: var(--color-gray-200);
+  --ring: var(--color-black);
+
+  --radius: 0.5rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Theme Defaults (Dark Mode) */
+    --background: var(--color-black);
+    --foreground: var(--color-white);
+
+    --card-bg: var(--color-gray-900);
+    --card-foreground: var(--color-white);
+    --card-border: var(--color-gray-800);
+
+    --primary: var(--color-white);
+    --primary-foreground: var(--color-black);
+
+    --secondary: var(--color-gray-800);
+    --secondary-foreground: var(--color-gray-50);
+
+    --muted: var(--color-gray-800);
+    --muted-foreground: var(--color-gray-400);
+
+    --accent: var(--color-gray-800);
+    --accent-foreground: var(--color-gray-50);
+
+    --border: var(--color-gray-800);
+    --input: var(--color-gray-800);
+    --ring: var(--color-white);
   }
 }
 
-html,
 body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
+  @apply bg-background text-foreground;
   font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
 }
 
 a {
@@ -35,8 +85,21 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+/* Utilities */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
