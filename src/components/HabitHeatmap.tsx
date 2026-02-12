@@ -1,203 +1,319 @@
-import React, { useState, useMemo } from "react";
-import { format, eachDayOfInterval, subDays, isSameDay, startOfWeek, endOfWeek, getDay, isSameMonth, addDays, differenceInCalendarDays, subWeeks } from "date-fns";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useHabitStore, Habit } from "@/store/useHabitStore";
-import { PatternOverlay } from "./PatternOverlay";
+import { format, getDay, addDays, subDays } from "date-fns";
 import { DayDetailModal } from "./DayDetailModal";
+import { HABIT_THEMES, DEFAULT_THEME, getTheme } from "@/lib/habit-themes";
 import { cn } from "@/lib/utils";
+import { Edit2 } from "lucide-react";
 
 interface HabitHeatmapProps {
     habit: Habit;
 }
 
+interface WeekData {
+    id: number;
+    monday: Date; // The Monday of this week
+    days: Date[]; // Array of 7 days (Mon-Sun)
+}
+
 export const HabitHeatmap: React.FC<HabitHeatmapProps> = ({ habit }) => {
-    const { checkIns, toggleCheckIn } = useHabitStore();
+    const { checkIns, setCheckInValue } = useHabitStore();
+    const [weeks, setWeeks] = useState<WeekData[]>([]);
+    const [isLoadingBottom, setIsLoadingBottom] = useState(false);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+    // Modal state
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-    // Configuration
-    const today = new Date();
-    const weeksToShow = 20; // Number of weeks to show
+    // Year Indicator state
+    const [visibleYear, setVisibleYear] = useState(new Date().getFullYear());
+    const [showYearIndicator, setShowYearIndicator] = useState(false);
+    const yearIndicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Calculate start date: ensure it starts on a Sunday (or start of week)
-    // We want to show exactly `weeksToShow` columns.
-    // The last column should contain 'today'.
-    // So we invoke startOfWeek on today, then subtract (weeksToShow - 1) weeks.
-
-    const rangeEnd = endOfWeek(today);
-    const rangeStart = subWeeks(startOfWeek(today), weeksToShow - 1);
-
-    const days = useMemo(() => {
-        return eachDayOfInterval({ start: rangeStart, end: rangeEnd });
-    }, [rangeStart, rangeEnd]);
-
+    // Theme Config
+    const theme = getTheme(habit.theme);
     const habitCheckIns = checkIns[habit.id] || {};
 
-    // Group days into weeks for easier column rendering logic if needed, 
-    // but CSS Grid flow-col with rows=7 handles this naturally.
-    // We just need to make sure `days` length is a multiple of 7.
-    // date-fns `eachDayOfInterval` with start/end of weeks guarantees this.
-
-    // Generate Month Labels
-    // We need to determine which weeks start a new month.
-    const weeks = useMemo(() => {
-        const weekList = [];
-        let currentWeekStart = rangeStart;
-        while (currentWeekStart <= rangeEnd) {
-            weekList.push(currentWeekStart);
-            currentWeekStart = addDays(currentWeekStart, 7);
-        }
-        return weekList;
-    }, [rangeStart, rangeEnd]);
-
-    const monthLabels = useMemo(() => {
-        const labels: { label: string, colIndex: number }[] = [];
-        let lastMonthStr = "";
-
-        weeks.forEach((weekStart, index) => {
-            const monthStr = format(weekStart, "MMM");
-            // Show label if it's the first week of the heatmap OR if month changes
-            // But usually GitHub shows it when the majority of the week is in the new month?
-            // Simple rule: If the week contains the 1st of the month, show label?
-            // Let's just use the month of the start of the week.
-            // If it changes from previous week, show it.
-            if (monthStr !== lastMonthStr) {
-                labels.push({ label: monthStr, colIndex: index });
-                lastMonthStr = monthStr;
-            }
-        });
-        return labels;
-    }, [weeks]);
-
-
-    const handleDayClick = (day: Date) => {
-        const dateString = format(day, "yyyy-MM-dd");
-        const isCompleted = habitCheckIns[dateString]?.completed;
-        const isFuture = day > today;
-
-        if (isFuture) return;
-
-        if (!isCompleted) {
-            toggleCheckIn(habit.id, dateString);
-        } else {
-            setSelectedDate(day); // Open modal for details/unchecking
-        }
+    // Helper: Get Monday of a date
+    const getMonday = (date: Date) => {
+        const d = new Date(date);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+        return new Date(d.setDate(diff));
     };
 
+    // Helper: Format row header (e.g. "Sep 21")
+    const formatRowHeader = (date: Date) => {
+        return format(date, "MMM d");
+    };
+
+    // Helper: Generate week days
+    const generateWeek = (mondayDate: Date) => {
+        const week = [];
+        for (let i = 0; i < 7; i++) {
+            week.push(addDays(mondayDate, i));
+        }
+        return week;
+    };
+
+    // Init Logic: Load current week + 10 past weeks
+    useEffect(() => {
+        const today = new Date();
+        const currentMonday = getMonday(today);
+        const initialWeeks: WeekData[] = [];
+
+        // Start from current week (i=0) and go back 10 weeks
+        // User asked for: "Current Week at Top" implementation.
+        // So we push current week first, then past weeks.
+        for (let i = 0; i >= -10; i--) {
+            const monday = addDays(currentMonday, i * 7);
+            initialWeeks.push({
+                id: monday.getTime(),
+                monday: monday,
+                days: generateWeek(monday)
+            });
+        }
+        setWeeks(initialWeeks);
+    }, []);
+
+    // Load past weeks (Infinite Scroll)
+    const loadPastWeeks = useCallback(() => {
+        if (isLoadingBottom || weeks.length === 0) return;
+
+        setIsLoadingBottom(true);
+        setTimeout(() => {
+            const lastMonday = weeks[weeks.length - 1].monday;
+            const newWeeks: WeekData[] = [];
+
+            for (let i = 1; i <= 4; i++) {
+                const monday = subDays(lastMonday, i * 7);
+                newWeeks.push({
+                    id: monday.getTime(),
+                    monday: monday,
+                    days: generateWeek(monday)
+                });
+            }
+
+            setWeeks(prev => [...prev, ...newWeeks]);
+            setIsLoadingBottom(false);
+        }, 300); // Simulate network/calc delay and for smooth UX
+    }, [weeks, isLoadingBottom]);
+
+    // Scroll Handler
+    const handleScroll = useCallback(() => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+
+        const { scrollTop, scrollHeight, clientHeight } = container;
+
+        // Show Year Indicator
+        setShowYearIndicator(true);
+        if (yearIndicatorTimeoutRef.current) clearTimeout(yearIndicatorTimeoutRef.current);
+        yearIndicatorTimeoutRef.current = setTimeout(() => setShowYearIndicator(false), 1500);
+
+        // Update Visible Year
+        // Find week element closest to center
+        const middleY = container.getBoundingClientRect().top + clientHeight / 2;
+        const weekElements = container.querySelectorAll('[data-week-monday]');
+
+        let closestDist = Infinity;
+        let closestYear = visibleYear;
+
+        weekElements.forEach(el => {
+            const rect = el.getBoundingClientRect();
+            const elemMiddle = rect.top + rect.height / 2;
+            const dist = Math.abs(elemMiddle - middleY);
+            if (dist < closestDist) {
+                closestDist = dist;
+                const ts = parseInt(el.getAttribute('data-week-monday') || '0');
+                if (ts) closestYear = new Date(ts).getFullYear();
+            }
+        });
+        setVisibleYear(closestYear);
+
+        // Check Infinite Scroll threshold (200px from bottom)
+        if (scrollHeight - scrollTop - clientHeight < 200 && !isLoadingBottom) {
+            loadPastWeeks();
+        }
+    }, [isLoadingBottom, loadPastWeeks, visibleYear]);
+
+    const scrollToToday = () => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+
+        // Scroll to top because current week is always at top [index 0]
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // Interaction Handlers
+    const handleDayLeftClick = (date: Date, e: React.MouseEvent) => {
+        e.preventDefault();
+        const dateKey = format(date, "yyyy-MM-dd");
+        // Prevent future dates logic? User said "Calendar stops at current week, preventing future entries"
+        // But if current week has future days (e.g. today is Wed, Thu/Fri are future), usually we disable them.
+        if (date > new Date()) return;
+
+        const currentData = habitCheckIns[dateKey];
+        // If has value, increment. If boolean true, treat as 1 -> 2. If empty/false -> 1.
+        const currentVal = currentData?.value !== undefined
+            ? currentData.value
+            : (currentData?.completed ? 1 : 0);
+
+        const newVal = currentVal + 1;
+        setCheckInValue(habit.id, dateKey, newVal);
+    };
+
+    const handleDayRightClick = (date: Date, e: React.MouseEvent) => {
+        e.preventDefault();
+        // Allow editing today or past
+        if (date > new Date()) return;
+
+        setSelectedDate(date);
+    };
+
+    // Styling Helpers
+    const getIntensityClass = (val: number) => {
+        if (val === 0) return theme.intensity[0];
+        if (val <= 5) return theme.intensity[1];
+        if (val <= 10) return theme.intensity[2];
+        if (val <= 20) return theme.intensity[3];
+        return theme.intensity[4];
+    };
+
+    const weekDays = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+
+    // Stats for Legend
+    // actually legend is static
+
     return (
-        <div className="w-full overflow-x-auto pb-2">
-            <div className="min-w-fit inline-block">
-                {/* Month Labels */}
-                <div className="flex text-xs text-muted-foreground mb-1 h-5 relative">
-                    {/* Spacer for weekday labels column */}
-                    <div className="w-8 shrink-0" />
+        <div className={cn("flex flex-col h-[600px] overflow-hidden rounded-xl border border-gray-200 shadow-sm transition-colors", theme.baseBg)}>
 
-                    {/* Render labels absolutely positioned relative to the grid columns would be hard 
-                        without a fixed pixel width. 
-                        Instead, let's use a similar grid structure or flex with spacers?
-                        
-                        Actually, CSS Grid is best here.
-                        We have `weeksToShow` columns.
-                    */}
-                    <div
-                        className="grid gap-1 flex-1"
-                        style={{
-                            gridTemplateColumns: `repeat(${weeksToShow}, minmax(0, 1fr))`
-                        }}
-                    >
-                        {monthLabels.map((item) => (
-                            <div
-                                key={`${item.label}-${item.colIndex}`}
-                                className="col-span-2 overflow-visible whitespace-nowrap"
-                                style={{ gridColumnStart: item.colIndex + 1 }}
-                            >
-                                {item.label}
+            {/* Header Columns */}
+            <div className={`flex border-b border-gray-200 bg-white/50 backdrop-blur-sm z-10 sticky top-0`}>
+                <div className="w-16 flex-shrink-0 px-2 py-3 text-xs font-semibold text-gray-500 text-center">
+                    Week
+                </div>
+                {weekDays.map(d => (
+                    <div key={d} className="flex-1 text-center py-3 text-xs font-semibold text-gray-700">
+                        {d}
+                    </div>
+                ))}
+            </div>
+
+            {/* Scrollable Area */}
+            <div
+                ref={scrollContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto relative"
+            >
+                {/* Year Overlay */}
+                {showYearIndicator && (
+                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none sticky">
+                        <div className="bg-gray-900/90 text-white px-6 py-2 rounded-full shadow-xl backdrop-blur-md">
+                            <span className="text-xl font-bold">{visibleYear}</span>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex flex-col">
+                    {weeks.map(week => (
+                        <div
+                            key={week.id}
+                            className="flex border-b border-gray-100/50 hover:bg-white/30 transition-colors py-1"
+                            data-week-monday={week.id}
+                        >
+                            {/* Row Header */}
+                            <div className="w-16 flex-shrink-0 flex items-center justify-center text-[10px] font-medium text-gray-400">
+                                {formatRowHeader(week.monday)}
                             </div>
-                        ))}
-                    </div>
-                </div>
 
-                <div className="flex gap-1">
-                    {/* Weekday Labels (Mon, Wed, Fri) */}
-                    <div className="flex flex-col justify-between text-[10px] text-muted-foreground py-[2px] w-8 pr-1 font-medium items-end leading-none">
-                        {/* 
-                            Grid has 7 rows.
-                            Row 1: Sun
-                            Row 2: Mon
-                            Row 3: Tue
-                            Row 4: Wed
-                            Row 5: Thu
-                            Row 6: Fri
-                            Row 7: Sat
-                         */}
-                        <div className="h-3 relative -top-[1px]"></div> {/* Sun placeholder */}
-                        <div className="h-3 relative -top-[1px]">Mon</div>
-                        <div className="h-3 relative -top-[1px]"></div> {/* Tue */}
-                        <div className="h-3 relative -top-[1px]">Wed</div>
-                        <div className="h-3 relative -top-[1px]"></div> {/* Thu */}
-                        <div className="h-3 relative -top-[1px]">Fri</div>
-                        <div className="h-3 relative -top-[1px]"></div> {/* Sat */}
-                    </div>
+                            {/* Days */}
+                            {week.days.map(date => {
+                                const dateKey = format(date, "yyyy-MM-dd");
+                                const isToday = dateKey === todayStr;
+                                const isFuture = date > new Date();
+                                const data = habitCheckIns[dateKey];
+                                const hasData = data?.completed || (data?.value && data.value > 0);
+                                const val = data?.value !== undefined ? data.value : (data?.completed ? 1 : 0);
+                                const hasNote = !!data?.note;
 
-                    {/* Heatmap Grid */}
-                    <div
-                        className="grid grid-flow-col grid-rows-7 gap-1"
-                        style={{
-                            // Ensure strict grid layout
-                        }}
-                    >
-                        {days.map((day) => {
-                            const dateString = format(day, "yyyy-MM-dd");
-                            const checkIn = habitCheckIns[dateString];
-                            const isCompleted = checkIn?.completed;
-                            const hasNote = !!checkIn?.note;
-                            const isToday = isSameDay(day, today);
-                            const isFuture = day > today;
-
-                            return (
-                                <button
-                                    key={dateString}
-                                    disabled={isFuture}
-                                    onClick={() => handleDayClick(day)}
-                                    title={`${format(day, "PPP")}${hasNote ? " (Has note)" : ""}`}
-                                    className={cn(
-                                        "relative h-3 w-3 rounded-[2px] flex items-center justify-center overflow-hidden transition-all group outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                                        isCompleted
-                                            ? "border border-transparent" // Colored by style below
-                                            : "border border-border/40 bg-muted/20 hover:border-primary/50",
-                                        isToday && !isCompleted && "ring-1 ring-primary/40",
-                                        isFuture && "opacity-0 cursor-default" // Hide future days completely or make them invisible? GitHub just stops.
-                                        // But we are filling the grid. CSS Grid columns must be full.
-                                        // So we just make them invisible placeholders if they are after today?
-                                        // Actually `eachDayOfInterval` goes up to endOfWeek(today).
-                                        // So future days in the current week WILL exist.
-                                        // Let's style them as disabled.
-                                    )}
-                                    style={{
-                                        backgroundColor: isCompleted ? habit.color : undefined
-                                    }}
-                                >
-                                    {isCompleted && (
-                                        <>
-                                            <PatternOverlay
-                                                pattern={habit.pattern}
-                                                color={habit.color === "#ffffff" ? "#000000" : habit.color}
-                                                opacity={0.8}
-                                            />
-                                            {habit.pattern === 'none' && (
-                                                <div className="w-full h-full" style={{ backgroundColor: habit.color }} />
+                                return (
+                                    <div key={dateKey} className="flex-1 px-1 py-1">
+                                        <button
+                                            onClick={(e) => handleDayLeftClick(date, e)}
+                                            onContextMenu={(e) => handleDayRightClick(date, e)}
+                                            disabled={isFuture}
+                                            title={`${format(date, "PPP")} - ${val} reps`}
+                                            className={cn(
+                                                "w-full h-12 rounded-lg text-xs font-medium transition-all duration-200 relative flex flex-col items-center justify-center",
+                                                !isFuture ? getIntensityClass(val) : "opacity-20 cursor-default bg-gray-100",
+                                                isToday && "ring-2 ring-offset-2 ring-primary",
+                                                !isFuture && "hover:scale-105 hover:shadow-sm active:scale-95"
                                             )}
-                                        </>
-                                    )}
-                                    {hasNote && (
-                                        <div className="absolute top-0.5 right-0.5">
-                                            {/* Scale down note indicator for smaller cells */}
-                                            <div className={cn("h-1 w-1 rounded-full", isCompleted ? "bg-white ring-1 ring-black/20" : "bg-primary")} />
-                                        </div>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
+                                        >
+                                            <span className="opacity-70 text-[10px]">{date.getDate()}</span>
+                                            {hasData && val > 0 && (
+                                                <span className="font-bold">{val}</span>
+                                            )}
+
+                                            {hasNote && (
+                                                <div className="absolute top-1 right-1">
+                                                    <div className={cn("w-1.5 h-1.5 rounded-full", val > 0 ? "bg-white/70" : "bg-gray-400")} />
+                                                </div>
+                                            )}
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ))}
+
+                    {isLoadingBottom && (
+                        <div className="text-center py-4 text-xs text-gray-500 animate-pulse">
+                            Loading history...
+                        </div>
+                    )}
                 </div>
+            </div>
+
+            {/* Footer / Controls */}
+            <div className="p-4 border-t border-gray-200 bg-white flex items-center justify-between">
+                {/* Legend */}
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span className="font-medium mr-1">Intensity:</span>
+                    {/* 0 */}
+                    <div className="flex items-center gap-1">
+                        <div className={cn("w-3 h-3 rounded box-border border border-gray-200 bg-gray-50")}></div>
+                        <span>0</span>
+                    </div>
+                    {/* Ranges */}
+                    {[
+                        { label: '1-5', cls: theme.intensity[1] },
+                        { label: '6-10', cls: theme.intensity[2] },
+                        { label: '11-20', cls: theme.intensity[3] },
+                        { label: '20+', cls: theme.intensity[4] },
+                    ].map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-1">
+                            <div className={cn("w-3 h-3 rounded", item.cls)}></div>
+                            <span className="hidden sm:inline">{item.label}</span>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Today Scroll Button */}
+                <button
+                    onClick={scrollToToday}
+                    className={cn(
+                        "px-4 py-2 rounded-full text-xs font-semibold text-white shadow-md hover:shadow-lg transition-all flex items-center gap-1 sm:gap-2",
+                        // Use theme gradient for button
+                        `bg-gradient-to-r ${theme.gradient.replace('from-', 'from-').replace('to-', 'to-')} bg-[length:200%_200%] animate-gradient`
+                    )}
+                    // Fallback style if gradient doesn't behave well as bg-image
+                    style={{ backgroundColor: theme.primaryColor }}
+                >
+                    Today
+                </button>
             </div>
 
             {selectedDate && (

@@ -32,6 +32,25 @@ export interface CheckIn {
 // Map habitId -> dateString (YYYY-MM-DD) -> CheckIn
 export type CheckInsMap = Record<string, Record<string, CheckIn>>;
 
+// Enhanced CheckIn with numeric value for heatmap
+export interface CheckIn {
+    completed: boolean;
+    value?: number; // Added for heatmap intensity (reps)
+    note?: string;
+    timestamp: number;
+}
+
+export interface Habit {
+    id: string;
+    name: string;
+    frequency: FrequencyType;
+    color: string;
+    theme?: string; // Added for heatmap theme (blue, green, etc.)
+    pattern: PatternType;
+    createdAt: string;
+    archived: boolean;
+}
+
 interface HabitState {
     habits: Habit[];
     checkIns: CheckInsMap;
@@ -42,6 +61,7 @@ interface HabitState {
     reorderHabits: (newOrder: Habit[]) => void;
 
     toggleCheckIn: (habitId: string, date: string) => void;
+    setCheckInValue: (habitId: string, date: string, value: number) => void; // New action
     updateNote: (habitId: string, date: string, note: string) => void;
 
     importData: (habits: Habit[], checkIns: CheckInsMap) => void;
@@ -62,6 +82,8 @@ export const useHabitStore = create<HabitState>()(
                         id: generateId(),
                         createdAt: new Date().toISOString(),
                         archived: false,
+                        // Default theme if not provided, derived from color or fallback
+                        theme: habitData.theme || 'blue',
                     },
                 ],
             })),
@@ -86,17 +108,16 @@ export const useHabitStore = create<HabitState>()(
             toggleCheckIn: (habitId, date) => set((state) => {
                 const habitCheckIns = state.checkIns[habitId] || {};
                 const currentCheckIn = habitCheckIns[date];
+
                 const isCompleted = currentCheckIn?.completed ?? false;
+                const newValue = isCompleted ? 0 : 1;
 
                 const newCheckIn: CheckIn = {
                     completed: !isCompleted,
+                    value: newValue,
                     note: currentCheckIn?.note,
                     timestamp: Date.now(),
                 };
-
-                // If untoggling and no note, remove the entry to save space? 
-                // Or keep it as explicitly false? Let's keep it simple: if false and no note, remove it.
-                // Actually, if we just toggle, we might want to keep the note.
 
                 let newHabitCheckIns = { ...habitCheckIns };
 
@@ -114,9 +135,39 @@ export const useHabitStore = create<HabitState>()(
                 };
             }),
 
+            setCheckInValue: (habitId, date, value) => set((state) => {
+                const habitCheckIns = state.checkIns[habitId] || {};
+                const currentCheckIn = habitCheckIns[date];
+
+                // If value > 0, it is completed.
+                const completed = value > 0;
+
+                const newCheckIn: CheckIn = {
+                    completed,
+                    value,
+                    note: currentCheckIn?.note,
+                    timestamp: Date.now(),
+                };
+
+                let newHabitCheckIns = { ...habitCheckIns };
+
+                if (!completed && !newCheckIn.note) {
+                    delete newHabitCheckIns[date];
+                } else {
+                    newHabitCheckIns[date] = newCheckIn;
+                }
+
+                return {
+                    checkIns: {
+                        ...state.checkIns,
+                        [habitId]: newHabitCheckIns,
+                    }
+                };
+            }),
+
             updateNote: (habitId, date, note) => set((state) => {
                 const habitCheckIns = state.checkIns[habitId] || {};
-                const currentCheckIn = habitCheckIns[date] || { completed: false, timestamp: Date.now() }; // Note on non-completed day is possible? Yes.
+                const currentCheckIn = habitCheckIns[date] || { completed: false, value: 0, timestamp: Date.now() };
 
                 const newCheckIn: CheckIn = {
                     ...currentCheckIn,
