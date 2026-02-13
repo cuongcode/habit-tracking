@@ -38,3 +38,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - check office machine setup
 - check office setup alias
 - check home push code
+- check security setup bypass home machine
